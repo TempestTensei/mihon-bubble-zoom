@@ -35,7 +35,8 @@ class ProjectionRegionDetectorTest {
     @Test
     fun `detects a 2x2 grid of panels`() {
         val img = page(
-            100, 100,
+            100,
+            100,
             intArrayOf(10, 10, 45, 45),
             intArrayOf(55, 10, 90, 45),
             intArrayOf(10, 55, 45, 90),
@@ -58,7 +59,8 @@ class ProjectionRegionDetectorTest {
     @Test
     fun `ignores speckle noise below the minimum region size`() {
         val img = page(
-            100, 100,
+            100,
+            100,
             intArrayOf(10, 10, 45, 90),
             intArrayOf(55, 10, 90, 90),
             // scattered single-pixel specks
@@ -76,7 +78,8 @@ class ProjectionRegionDetectorTest {
     @Test
     fun `detected regions stay within normalized bounds`() {
         val img = page(
-            120, 80,
+            120,
+            80,
             intArrayOf(10, 10, 50, 35),
             intArrayOf(70, 10, 110, 35),
             intArrayOf(10, 45, 50, 70),
