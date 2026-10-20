@@ -23,7 +23,8 @@ class SpeechBubbleDetector(
 
     data class Config(
         val inkThreshold: Int = 160,
-        val whiteThreshold: Int = 190,
+        /** Interior pixels brighter than this count as the bubble's clean white paper. */
+        val pureWhiteThreshold: Int = 235,
         /** Dilate ink by this radius to close small breaks in bubble outlines. */
         val closeRadius: Int = 1,
         val minAreaFraction: Float = 0.004f,
@@ -32,14 +33,22 @@ class SpeechBubbleDetector(
         val maxWidthFraction: Float = 0.9f,
         val minHeightFraction: Float = 0.02f,
         val maxHeightFraction: Float = 0.7f,
-        /** The bounding box must be at least this fraction white (the bubble paper). */
-        val minInteriorWhiteRatio: Float = 0.5f,
+        /** The bounding box must be at least this fraction clean white (rejects screentone/art). */
+        val minPureWhiteRatio: Float = 0.5f,
         /** The bounding box must contain this fraction of ink (the text). */
         val minTextDensity: Float = 0.015f,
         val maxTextDensity: Float = 0.5f,
         /** The enclosed blob must fill this fraction of its bounding box (not a sliver). */
         val minSolidity: Float = 0.45f,
         val maxAspect: Float = 6f,
+        /** Minimum number of ink blobs inside — text has many, artwork has few. */
+        val minInkComponents: Int = 3,
+        /** Fraction of ink blobs that must be text-sized (small) rather than large strokes. */
+        val minSmallComponentRatio: Float = 0.6f,
+        /** A text-sized blob is at most this fraction of the page tall. */
+        val maxLetterHeightFraction: Float = 0.06f,
+        /** Reject if any single ink blob is taller than this fraction of the region (a big stroke). */
+        val maxDominantStrokeFraction: Float = 0.6f,
         /** Grow each detected bubble by this fraction so the outline is included. */
         val paddingFraction: Float = 0.03f,
     )
@@ -165,24 +174,91 @@ class SpeechBubbleDetector(
             if (!passesShape(bw, bh, blobArea, w, h)) continue
 
             var inkCount = 0
-            var whiteCount = 0
+            var pureWhiteCount = 0
             var total = 0
             for (yy in minY..maxY) {
                 val rb = yy * w
                 for (xx in minX..maxX) {
                     total++
                     if (ink[rb + xx]) inkCount++
-                    if (pixels[rb + xx] > config.whiteThreshold) whiteCount++
+                    if (pixels[rb + xx] > config.pureWhiteThreshold) pureWhiteCount++
                 }
             }
             val textDensity = inkCount.toFloat() / total
-            val whiteRatio = whiteCount.toFloat() / total
-            if (whiteRatio < config.minInteriorWhiteRatio) continue
+            val pureWhiteRatio = pureWhiteCount.toFloat() / total
+            if (pureWhiteRatio < config.minPureWhiteRatio) continue
             if (textDensity < config.minTextDensity || textDensity > config.maxTextDensity) continue
+            if (!looksLikeText(ink, w, minX, minY, maxX, maxY, h)) continue
 
             regions.add(pad(minX, minY, maxX + 1, maxY + 1, w, h))
         }
         return regions
+    }
+
+    /**
+     * Whether the ink inside the bounding box looks like text: several ink blobs, most of
+     * them text-sized, and no single blob tall enough to be a stroke of artwork. This is what
+     * separates a dialogue bubble from an enclosed white face, body or patch of scenery.
+     */
+    private fun looksLikeText(
+        ink: BooleanArray,
+        w: Int,
+        minX: Int,
+        minY: Int,
+        maxX: Int,
+        maxY: Int,
+        pageHeight: Int,
+    ): Boolean {
+        val bw = maxX - minX + 1
+        val bh = maxY - minY + 1
+        val maxLetterHeight = maxOf(2, (config.maxLetterHeightFraction * pageHeight).toInt())
+        val dominantLimit = config.maxDominantStrokeFraction * bh
+
+        val visited = BooleanArray(bw * bh)
+        val stack = IntArray(bw * bh)
+        var components = 0
+        var small = 0
+
+        for (ly in 0 until bh) {
+            for (lx in 0 until bw) {
+                if (!ink[(minY + ly) * w + (minX + lx)]) continue
+                val seed = ly * bw + lx
+                if (visited[seed]) continue
+                var sp = 0
+                stack[sp++] = seed
+                visited[seed] = true
+                var top = ly
+                var bottom = ly
+                while (sp > 0) {
+                    val p = stack[--sp]
+                    val px = p % bw
+                    val py = p / bw
+                    if (py < top) top = py
+                    if (py > bottom) bottom = py
+                    for (dy in -1..1) {
+                        for (dx in -1..1) {
+                            if (dx == 0 && dy == 0) continue
+                            val nx = px + dx
+                            val ny = py + dy
+                            if (nx < 0 || nx >= bw || ny < 0 || ny >= bh) continue
+                            val np = ny * bw + nx
+                            if (visited[np]) continue
+                            if (ink[(minY + ny) * w + (minX + nx)]) {
+                                visited[np] = true
+                                stack[sp++] = np
+                            }
+                        }
+                    }
+                }
+                val compHeight = bottom - top + 1
+                if (compHeight > dominantLimit) return false // a big stroke => artwork, not text
+                components++
+                if (compHeight <= maxLetterHeight) small++
+            }
+        }
+
+        if (components < config.minInkComponents) return false
+        return small.toFloat() / components >= config.minSmallComponentRatio
     }
 
     private fun passesShape(bw: Int, bh: Int, blobArea: Int, w: Int, h: Int): Boolean {

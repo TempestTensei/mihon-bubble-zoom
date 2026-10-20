@@ -105,6 +105,33 @@ class SpeechBubbleDetectorTest {
     }
 
     @Test
+    fun `ignores an enclosed white region containing only large strokes (artwork face)`() {
+        val w = 200
+        val h = 200
+        val px = blank(w, h)
+        outline(px, w, 40, 40, 150, 160)
+        // a few big strokes spanning most of the interior height, like facial linework
+        fill(px, w, 60, 50, 66, 150)
+        fill(px, w, 90, 50, 96, 150)
+        fill(px, w, 120, 55, 126, 145)
+
+        detector.detect(GrayImage(w, h, px)) shouldBe emptyList()
+    }
+
+    @Test
+    fun `ignores an enclosed screentone region`() {
+        val w = 200
+        val h = 200
+        val px = blank(w, h)
+        outline(px, w, 40, 40, 150, 120)
+        // gray screentone fill (not pure white) with a few marks
+        fill(px, w, 44, 44, 146, 116, color = 180)
+        text(px, w, 55, 55, cols = 5, rows = 3)
+
+        detector.detect(GrayImage(w, h, px)) shouldBe emptyList()
+    }
+
+    @Test
     fun `detected regions stay within normalized bounds`() {
         val w = 200
         val h = 200
