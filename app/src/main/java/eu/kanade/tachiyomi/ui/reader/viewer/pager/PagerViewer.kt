@@ -12,6 +12,10 @@ import androidx.core.view.isVisible
 import androidx.viewpager.widget.ViewPager
 import eu.kanade.tachiyomi.R
 import eu.kanade.tachiyomi.ui.reader.ReaderActivity
+import eu.kanade.tachiyomi.ui.reader.bubblezoom.GuidedZoomSession
+import eu.kanade.tachiyomi.ui.reader.bubblezoom.PanelDetectionCache
+import eu.kanade.tachiyomi.ui.reader.bubblezoom.ProjectionRegionDetector
+import eu.kanade.tachiyomi.ui.reader.bubblezoom.StepResult
 import eu.kanade.tachiyomi.ui.reader.model.ChapterTransition
 import eu.kanade.tachiyomi.ui.reader.model.InsertPage
 import eu.kanade.tachiyomi.ui.reader.model.ReaderPage
@@ -51,6 +55,18 @@ abstract class PagerViewer(val activity: ReaderActivity) : Viewer {
      * Adapter of the pager.
      */
     private val adapter = PagerViewerAdapter(this)
+
+    /**
+     * Shared cache of detected panels per page, used by the bubble-zoom feature. Holders
+     * populate it off the main thread; this viewer reads it when stepping through regions.
+     */
+    val panelDetectionCache = PanelDetectionCache(ProjectionRegionDetector())
+
+    /**
+     * Active bubble-zoom session for the current page, or null when bubble zoom is off or
+     * the current page cannot be region-zoomed.
+     */
+    private var guidedSession: GuidedZoomSession? = null
 
     /**
      * Currently active item. It can be a chapter page or a chapter transition.
@@ -112,7 +128,10 @@ abstract class PagerViewer(val activity: ReaderActivity) : Viewer {
                 (event.rawY - viewPosition[1] + viewPositionRelativeToWindow[1]) / pager.height,
             )
             when (config.navigator.getAction(pos)) {
-                NavigationRegion.MENU -> activity.toggleMenu()
+                NavigationRegion.MENU -> {
+                    resetGuidedZoomIfActive()
+                    activity.toggleMenu()
+                }
                 NavigationRegion.NEXT -> moveToNext()
                 NavigationRegion.PREV -> moveToPrevious()
                 NavigationRegion.RIGHT -> moveRight()
@@ -228,8 +247,24 @@ abstract class PagerViewer(val activity: ReaderActivity) : Viewer {
         logcat { "onReaderPageSelected: ${page.number}/${pages.size}" }
         activity.onPageSelected(page)
 
+        val holder = getPageHolder(page)
+        val useBubbleZoom = config.bubbleZoomEnabled && holder != null && holder.supportsRegionZoom()
+        // Suppress the automatic landscape zoom so it doesn't fight the region zoom below.
+        holder?.regionZoomActive = useBubbleZoom
+
         // Notify holder of page change
-        getPageHolder(page)?.onPageSelected(forward)
+        holder?.onPageSelected(forward)
+
+        if (useBubbleZoom && holder != null) {
+            val session = GuidedZoomSession(panelDetectionCache.getOrNull(holder.bubbleZoomKey()).orEmpty())
+            guidedSession = session
+            val result = if (forward) session.enterFromStart() else session.enterFromEnd()
+            if (result is StepResult.Zoom) {
+                holder.zoomToRegion(result.region, config.bubbleZoomPadding, config.bubbleZoomDurationMillis)
+            }
+        } else {
+            guidedSession = null
+        }
 
         // Skip preload on inserts it causes unwanted page jumping
         if (page is InsertPage) {
@@ -331,6 +366,16 @@ abstract class PagerViewer(val activity: ReaderActivity) : Viewer {
      * Moves to the page at the right.
      */
     protected open fun moveRight() {
+        when (guidedStep(forward = this !is R2LPagerViewer)) {
+            GuidedOutcome.CONSUMED -> return
+            GuidedOutcome.CROSS_PAGE -> {
+                if (pager.currentItem != adapter.count - 1) {
+                    pager.setCurrentItem(pager.currentItem + 1, config.usePageTransitions)
+                }
+                return
+            }
+            GuidedOutcome.INACTIVE -> Unit
+        }
         if (pager.currentItem != adapter.count - 1) {
             val holder = (currentPage as? ReaderPage)?.let(::getPageHolder)
             if (holder != null && config.navigateToPan && holder.canPanRight()) {
@@ -345,6 +390,16 @@ abstract class PagerViewer(val activity: ReaderActivity) : Viewer {
      * Moves to the page at the left.
      */
     protected open fun moveLeft() {
+        when (guidedStep(forward = this is R2LPagerViewer)) {
+            GuidedOutcome.CONSUMED -> return
+            GuidedOutcome.CROSS_PAGE -> {
+                if (pager.currentItem != 0) {
+                    pager.setCurrentItem(pager.currentItem - 1, config.usePageTransitions)
+                }
+                return
+            }
+            GuidedOutcome.INACTIVE -> Unit
+        }
         if (pager.currentItem != 0) {
             val holder = (currentPage as? ReaderPage)?.let(::getPageHolder)
             if (holder != null && config.navigateToPan && holder.canPanLeft()) {
@@ -353,6 +408,52 @@ abstract class PagerViewer(val activity: ReaderActivity) : Viewer {
                 pager.setCurrentItem(pager.currentItem - 1, config.usePageTransitions)
             }
         }
+    }
+
+    private enum class GuidedOutcome { CONSUMED, CROSS_PAGE, INACTIVE }
+
+    /**
+     * Steps bubble zoom within the current page before any page turn.
+     *
+     * Returns [GuidedOutcome.CONSUMED] when a region was zoomed (do not turn the page),
+     * [GuidedOutcome.CROSS_PAGE] when no region remains in that direction (turn the page
+     * directly, bypassing the pan branch), or [GuidedOutcome.INACTIVE] when bubble zoom is
+     * not driving the current page (fall through to normal navigation).
+     */
+    private fun guidedStep(forward: Boolean): GuidedOutcome {
+        if (!config.bubbleZoomEnabled) return GuidedOutcome.INACTIVE
+        val holder = (currentPage as? ReaderPage)?.let(::getPageHolder) ?: return GuidedOutcome.INACTIVE
+        if (!holder.supportsRegionZoom()) return GuidedOutcome.INACTIVE
+
+        val session = guidedSession ?: GuidedZoomSession(
+            panelDetectionCache.getOrNull(holder.bubbleZoomKey()).orEmpty(),
+        ).also {
+            guidedSession = it
+            holder.regionZoomActive = true
+        }
+
+        return when (val result = if (forward) session.forward() else session.backward()) {
+            is StepResult.Zoom -> {
+                holder.zoomToRegion(result.region, config.bubbleZoomPadding, config.bubbleZoomDurationMillis)
+                GuidedOutcome.CONSUMED
+            }
+            StepResult.CrossPage -> GuidedOutcome.CROSS_PAGE
+            StepResult.FullPage -> GuidedOutcome.INACTIVE
+        }
+    }
+
+    /**
+     * If the current page is zoomed into a region, animates back to the full page and
+     * resets the session. Used when the user taps the menu region.
+     */
+    private fun resetGuidedZoomIfActive() {
+        if (!config.bubbleZoomEnabled) return
+        val session = guidedSession ?: return
+        if (session.index < 0) return
+        val holder = (currentPage as? ReaderPage)?.let(::getPageHolder) ?: return
+        if (!holder.supportsRegionZoom()) return
+        holder.resetRegionZoom(config.bubbleZoomDurationMillis)
+        guidedSession = GuidedZoomSession(panelDetectionCache.getOrNull(holder.bubbleZoomKey()).orEmpty())
     }
 
     /**
