@@ -59,6 +59,32 @@ class PanelDetectionCacheTest {
     }
 
     @Test
+    fun `getOrNull does not block while a detection is running`() {
+        val started = java.util.concurrent.CountDownLatch(1)
+        val release = java.util.concurrent.CountDownLatch(1)
+        val detector = RegionDetector {
+            started.countDown()
+            release.await()
+            emptyList()
+        }
+        val cache = PanelDetectionCache(detector)
+
+        val worker = kotlin.concurrent.thread { cache.detectAndCache("k", image, rtl = false) }
+        started.await()
+
+        // detect() is in-flight; a read for another key must return without waiting for it.
+        val reader = kotlin.concurrent.thread { cache.getOrNull("other") }
+        reader.join(1000)
+        val blockedWhileDetecting = reader.isAlive
+
+        release.countDown()
+        worker.join()
+        reader.join()
+
+        blockedWhileDetecting shouldBe false
+    }
+
+    @Test
     fun `least recently used entry is evicted past capacity`() {
         val cache = PanelDetectionCache(CountingDetector(listOf(Region(0f, 0f, 0.4f, 1f))), maxEntries = 2)
 

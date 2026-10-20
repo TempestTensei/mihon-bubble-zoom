@@ -13,20 +13,20 @@ class PanelDetectionCache(
     private val detector: RegionDetector,
     private val maxEntries: Int = 64,
 ) {
+    private val lock = Any()
+
     private val cache = object : LinkedHashMap<String, List<Region>>(16, 0.75f, true) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, List<Region>>): Boolean {
             return size > maxEntries
         }
     }
 
-    @Synchronized
-    fun getOrNull(key: String): List<Region>? = cache[key]
+    fun getOrNull(key: String): List<Region>? = synchronized(lock) { cache[key] }
 
-    @Synchronized
     fun detectAndCache(key: String, image: GrayImage, rtl: Boolean): List<Region> {
-        cache[key]?.let { return it }
+        synchronized(lock) { cache[key] }?.let { return it }
+        // Run detection outside the lock so main-thread reads never block on it.
         val ordered = RegionOrdering.order(detector.detect(image), rtl)
-        cache[key] = ordered
-        return ordered
+        return synchronized(lock) { cache.getOrPut(key) { ordered } }
     }
 }
