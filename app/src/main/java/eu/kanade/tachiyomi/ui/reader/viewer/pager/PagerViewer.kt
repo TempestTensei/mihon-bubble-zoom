@@ -248,15 +248,23 @@ abstract class PagerViewer(val activity: ReaderActivity) : Viewer {
         activity.onPageSelected(page)
 
         val holder = getPageHolder(page)
-        val useBubbleZoom = config.bubbleZoomEnabled && holder != null && holder.supportsRegionZoom()
-        // Suppress the automatic landscape zoom so it doesn't fight the region zoom below.
-        holder?.regionZoomActive = useBubbleZoom
+        // Engage bubble zoom only when panels for this page are already detected. Otherwise leave
+        // the full page (and its landscape auto-zoom) intact; the first tap engages later once
+        // detection has populated the cache. This avoids a page that shows neither zoom while
+        // detection is still running.
+        val regions = if (config.bubbleZoomEnabled && holder != null && holder.supportsRegionZoom()) {
+            panelDetectionCache.getOrNull(holder.bubbleZoomKey()).orEmpty()
+        } else {
+            emptyList()
+        }
+        // Suppress the automatic landscape zoom only when region zoom is actually driving the page.
+        holder?.regionZoomActive = regions.isNotEmpty()
 
         // Notify holder of page change
         holder?.onPageSelected(forward)
 
-        if (useBubbleZoom && holder != null) {
-            val session = GuidedZoomSession(panelDetectionCache.getOrNull(holder.bubbleZoomKey()).orEmpty())
+        if (regions.isNotEmpty() && holder != null) {
+            val session = GuidedZoomSession(regions)
             guidedSession = session
             val result = if (forward) session.enterFromStart() else session.enterFromEnd()
             if (result is StepResult.Zoom) {
@@ -425,11 +433,15 @@ abstract class PagerViewer(val activity: ReaderActivity) : Viewer {
         val holder = (currentPage as? ReaderPage)?.let(::getPageHolder) ?: return GuidedOutcome.INACTIVE
         if (!holder.supportsRegionZoom()) return GuidedOutcome.INACTIVE
 
-        val session = guidedSession ?: GuidedZoomSession(
-            panelDetectionCache.getOrNull(holder.bubbleZoomKey()).orEmpty(),
-        ).also {
-            guidedSession = it
-            holder.regionZoomActive = true
+        val session = guidedSession ?: run {
+            // Lazily build the session on the first tap once detection has produced regions.
+            // With no regions yet, stay inactive so normal navigation (and landscape zoom) apply.
+            val regions = panelDetectionCache.getOrNull(holder.bubbleZoomKey()).orEmpty()
+            if (regions.isEmpty()) return GuidedOutcome.INACTIVE
+            GuidedZoomSession(regions).also {
+                guidedSession = it
+                holder.regionZoomActive = true
+            }
         }
 
         return when (val result = if (forward) session.forward() else session.backward()) {
