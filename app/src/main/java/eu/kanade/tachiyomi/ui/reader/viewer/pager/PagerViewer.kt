@@ -14,8 +14,8 @@ import eu.kanade.tachiyomi.R
 import eu.kanade.tachiyomi.ui.reader.ReaderActivity
 import eu.kanade.tachiyomi.ui.reader.bubblezoom.GuidedZoomSession
 import eu.kanade.tachiyomi.ui.reader.bubblezoom.PanelDetectionCache
-import eu.kanade.tachiyomi.ui.reader.bubblezoom.ProjectionRegionDetector
 import eu.kanade.tachiyomi.ui.reader.bubblezoom.StepResult
+import eu.kanade.tachiyomi.ui.reader.bubblezoom.TextRegionDetector
 import eu.kanade.tachiyomi.ui.reader.model.ChapterTransition
 import eu.kanade.tachiyomi.ui.reader.model.InsertPage
 import eu.kanade.tachiyomi.ui.reader.model.ReaderPage
@@ -60,7 +60,7 @@ abstract class PagerViewer(val activity: ReaderActivity) : Viewer {
      * Shared cache of detected panels per page, used by the bubble-zoom feature. Holders
      * populate it off the main thread; this viewer reads it when stepping through regions.
      */
-    val panelDetectionCache = PanelDetectionCache(ProjectionRegionDetector())
+    val panelDetectionCache = PanelDetectionCache(TextRegionDetector())
 
     /**
      * Active bubble-zoom session for the current page, or null when bubble zoom is off or
