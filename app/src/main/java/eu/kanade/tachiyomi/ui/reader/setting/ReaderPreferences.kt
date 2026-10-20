@@ -117,6 +117,22 @@ class ReaderPreferences(
 
     // endregion
 
+    // region Bubble zoom
+
+    val bubbleZoom: Preference<Boolean> = preferenceStore.getBoolean("pref_bubble_zoom_key", false)
+
+    val bubbleZoomPadding: Preference<Int> = preferenceStore.getInt(
+        "pref_bubble_zoom_padding",
+        BUBBLE_ZOOM_PADDING_DEFAULT,
+    )
+
+    val bubbleZoomAnimationDuration: Preference<Int> = preferenceStore.getInt(
+        "pref_bubble_zoom_animation_duration",
+        BUBBLE_ZOOM_DURATION_DEFAULT,
+    )
+
+    // endregion
+
     // region Split two-page spread
 
     val dualPageSplitPaged: Preference<Boolean> = preferenceStore.getBoolean("pref_dual_page_split", false)
@@ -315,6 +331,14 @@ class ReaderPreferences(
         const val WEBTOON_PADDING_MAX = 25
 
         const val MILLI_CONVERSION = 100
+
+        const val BUBBLE_ZOOM_PADDING_MIN = 0
+        const val BUBBLE_ZOOM_PADDING_MAX = 25
+        const val BUBBLE_ZOOM_PADDING_DEFAULT = 8
+
+        const val BUBBLE_ZOOM_DURATION_MIN = 100
+        const val BUBBLE_ZOOM_DURATION_MAX = 800
+        const val BUBBLE_ZOOM_DURATION_DEFAULT = 300
 
         val TapZones = listOf(
             MR.strings.label_default,
