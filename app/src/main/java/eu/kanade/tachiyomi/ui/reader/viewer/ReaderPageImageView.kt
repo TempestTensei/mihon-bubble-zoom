@@ -1,11 +1,14 @@
 package eu.kanade.tachiyomi.ui.reader.viewer
 
 import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.Color
 import android.graphics.PointF
 import android.graphics.RectF
 import android.graphics.drawable.Animatable
 import android.graphics.drawable.BitmapDrawable
 import android.graphics.drawable.Drawable
+import android.graphics.drawable.GradientDrawable
 import android.util.AttributeSet
 import android.view.GestureDetector
 import android.view.MotionEvent
@@ -13,6 +16,7 @@ import android.view.View
 import android.view.ViewGroup.LayoutParams.MATCH_PARENT
 import android.view.ViewGroup.LayoutParams.WRAP_CONTENT
 import android.widget.FrameLayout
+import android.widget.ImageView
 import androidx.annotation.AttrRes
 import androidx.annotation.CallSuper
 import androidx.annotation.StyleRes
@@ -120,14 +124,20 @@ open class ReaderPageImageView @JvmOverloads constructor(
     }
 
     /**
-     * When true, the bubble-zoom feature is driving the zoom for this page, so the
-     * automatic landscape zoom must not fight it.
+     * When true, bubble zoom is popping regions on this page, so the page is kept at
+     * full-page fit and the automatic landscape zoom must not engage.
      */
     var regionZoomActive: Boolean = false
 
     /**
-     * Whether this page is backed by a ready [SubsamplingScaleImageView] and can be
-     * zoomed to a region. Animated (GIF) pages and not-yet-loaded pages return false.
+     * Overlay that shows the currently popped bubble, enlarged over the page.
+     */
+    private var popView: ImageView? = null
+
+    /**
+     * Whether this page is backed by a ready [SubsamplingScaleImageView], so a region
+     * can be mapped to screen coordinates. Animated (GIF) and not-yet-loaded pages
+     * return false.
      */
     fun supportsRegionZoom(): Boolean {
         val view = pageView as? SubsamplingScaleImageView ?: return false
@@ -135,50 +145,74 @@ open class ReaderPageImageView @JvmOverloads constructor(
     }
 
     /**
-     * Animates a zoom into [region] (normalized source coordinates), padded by
-     * [paddingPercent] on each side, so it fills the view. No-op unless the page is a
-     * ready [SubsamplingScaleImageView].
+     * Pops [bitmap] (a crop of [region]) out of the page: draws it as an enlarged card
+     * over the bubble's location while the page stays at full-page fit, so the full page
+     * remains visible. [popFactor] is how much larger than its on-page size the bubble is
+     * drawn (e.g. 1.5 = 50% bigger). No-op unless the page is a ready
+     * [SubsamplingScaleImageView].
      */
-    fun zoomToRegion(region: Region, paddingPercent: Int, durationMillis: Int) {
+    fun showPop(bitmap: Bitmap, region: Region, popFactor: Float, durationMillis: Int) {
         val view = pageView as? SubsamplingScaleImageView ?: return
-        if (!view.isReady) return
+        if (!view.isReady || width == 0 || height == 0) return
         val sw = view.sWidth.toFloat()
         val sh = view.sHeight.toFloat()
-        if (sw <= 0f || sh <= 0f || width == 0 || height == 0) return
+        if (sw <= 0f || sh <= 0f) return
 
-        val padX = region.width * sw * (paddingPercent / 100f)
-        val padY = region.height * sh * (paddingPercent / 100f)
-        val left = (region.left * sw - padX).coerceAtLeast(0f)
-        val top = (region.top * sh - padY).coerceAtLeast(0f)
-        val right = (region.right * sw + padX).coerceAtMost(sw)
-        val bottom = (region.bottom * sh + padY).coerceAtMost(sh)
+        val topLeft = view.sourceToViewCoord(region.left * sw, region.top * sh) ?: return
+        val bottomRight = view.sourceToViewCoord(region.right * sw, region.bottom * sh) ?: return
+        val onPageWidth = bottomRight.x - topLeft.x
+        val onPageHeight = bottomRight.y - topLeft.y
+        if (onPageWidth <= 0f || onPageHeight <= 0f) return
 
-        val rectWidth = (right - left).coerceAtLeast(1f)
-        val rectHeight = (bottom - top).coerceAtLeast(1f)
-        val targetScale = minOf(width / rectWidth, height / rectHeight)
-            .coerceIn(view.minScale, view.maxScale)
-        val center = PointF((left + right) / 2f, (top + bottom) / 2f)
+        val popWidth = (onPageWidth * popFactor).coerceAtMost(width.toFloat())
+        val popHeight = (onPageHeight * popFactor).coerceAtMost(height.toFloat())
+        val centerX = (topLeft.x + bottomRight.x) / 2f
+        val centerY = (topLeft.y + bottomRight.y) / 2f
+        val left = (centerX - popWidth / 2f).coerceIn(0f, (width - popWidth).coerceAtLeast(0f))
+        val top = (centerY - popHeight / 2f).coerceIn(0f, (height - popHeight).coerceAtLeast(0f))
 
-        view.animateScaleAndCenter(targetScale, center)
-            ?.withDuration(durationMillis.toLong())
-            ?.withEasing(EASE_IN_OUT_QUAD)
-            ?.withInterruptible(true)
-            ?.start()
+        val density = resources.displayMetrics.density
+        val overlay = popView ?: ImageView(context).apply {
+            scaleType = ImageView.ScaleType.FIT_XY
+            isClickable = false
+            val pad = (3 * density).toInt()
+            setPadding(pad, pad, pad, pad)
+            background = GradientDrawable().apply {
+                setColor(Color.WHITE)
+                cornerRadius = 6 * density
+                setStroke((1 * density).toInt(), Color.argb(70, 0, 0, 0))
+            }
+            elevation = 8 * density
+            addView(this)
+            popView = this
+        }
+        overlay.setImageBitmap(bitmap)
+        overlay.layoutParams = LayoutParams(popWidth.toInt(), popHeight.toInt()).apply {
+            leftMargin = left.toInt()
+            topMargin = top.toInt()
+        }
+        overlay.isVisible = true
+        overlay.animate().cancel()
+        overlay.alpha = 0f
+        overlay.scaleX = 0.92f
+        overlay.scaleY = 0.92f
+        overlay.animate()
+            .alpha(1f)
+            .scaleX(1f)
+            .scaleY(1f)
+            .setDuration(durationMillis.toLong())
+            .start()
     }
 
     /**
-     * Animates back to the full-page view (minimum scale, centered). No-op unless the
-     * page is a ready [SubsamplingScaleImageView].
+     * Removes the bubble pop overlay, returning to the plain full page.
      */
-    fun resetRegionZoom(durationMillis: Int) {
-        val view = pageView as? SubsamplingScaleImageView ?: return
-        if (!view.isReady) return
-        val center = PointF(view.sWidth / 2f, view.sHeight / 2f)
-        view.animateScaleAndCenter(view.minScale, center)
-            ?.withDuration(durationMillis.toLong())
-            ?.withEasing(EASE_IN_OUT_QUAD)
-            ?.withInterruptible(true)
-            ?.start()
+    fun clearPop() {
+        popView?.let {
+            it.animate().cancel()
+            removeView(it)
+        }
+        popView = null
     }
 
     private fun SubsamplingScaleImageView.landscapeZoom(forward: Boolean) {
@@ -233,6 +267,7 @@ open class ReaderPageImageView @JvmOverloads constructor(
     }
 
     fun recycle() {
+        clearPop()
         stripRequest?.dispose()
         stripRequest = null
         pageView?.let {

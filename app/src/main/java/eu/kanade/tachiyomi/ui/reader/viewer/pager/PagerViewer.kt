@@ -268,7 +268,7 @@ abstract class PagerViewer(val activity: ReaderActivity) : Viewer {
             guidedSession = session
             val result = if (forward) session.enterFromStart() else session.enterFromEnd()
             if (result is StepResult.Zoom) {
-                holder.zoomToRegion(result.region, config.bubbleZoomPadding, config.bubbleZoomDurationMillis)
+                holder.popRegion(result.region, popFactor(), config.bubbleZoomDurationMillis)
             }
         } else {
             guidedSession = null
@@ -446,7 +446,7 @@ abstract class PagerViewer(val activity: ReaderActivity) : Viewer {
 
         return when (val result = if (forward) session.forward() else session.backward()) {
             is StepResult.Zoom -> {
-                holder.zoomToRegion(result.region, config.bubbleZoomPadding, config.bubbleZoomDurationMillis)
+                holder.popRegion(result.region, popFactor(), config.bubbleZoomDurationMillis)
                 GuidedOutcome.CONSUMED
             }
             StepResult.CrossPage -> GuidedOutcome.CROSS_PAGE
@@ -464,9 +464,11 @@ abstract class PagerViewer(val activity: ReaderActivity) : Viewer {
         if (session.index < 0) return
         val holder = (currentPage as? ReaderPage)?.let(::getPageHolder) ?: return
         if (!holder.supportsRegionZoom()) return
-        holder.resetRegionZoom(config.bubbleZoomDurationMillis)
+        holder.clearPopOverlay()
         guidedSession = GuidedZoomSession(panelDetectionCache.getOrNull(holder.bubbleZoomKey()).orEmpty())
     }
+
+    private fun popFactor(): Float = 1f + config.bubbleZoomMagnification / 100f
 
     /**
      * Moves to the page at the top (or previous).

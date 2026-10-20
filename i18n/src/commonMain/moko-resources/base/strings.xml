@@ -495,9 +495,9 @@
     <string name="pref_navigate_pan">Pan wide images</string>
     <string name="pref_landscape_zoom">Automatically zoom into wide images</string>
     <string name="pref_bubble_zoom">Bubble zoom</string>
-    <string name="pref_bubble_zoom_summary">Zoom into panels one at a time as you tap</string>
-    <string name="pref_bubble_zoom_padding">Zoom padding</string>
-    <string name="pref_bubble_zoom_animation_duration">Zoom animation duration</string>
+    <string name="pref_bubble_zoom_summary">Pop text bubbles out one at a time as you tap</string>
+    <string name="pref_bubble_zoom_magnification">Bubble magnification</string>
+    <string name="pref_bubble_zoom_animation_duration">Pop animation duration</string>
     <string name="pref_bubble_zoom_duration_value">%1$s ms</string>
     <string name="pref_zoom_start">Zoom start position</string>
     <string name="zoom_start_automatic">Automatic</string>

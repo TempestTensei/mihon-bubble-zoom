@@ -49,7 +49,7 @@ class PagerConfig(
     var bubbleZoomEnabled = false
         private set
 
-    var bubbleZoomPadding = ReaderPreferences.BUBBLE_ZOOM_PADDING_DEFAULT
+    var bubbleZoomMagnification = ReaderPreferences.BUBBLE_ZOOM_MAGNIFICATION_DEFAULT
         private set
 
     var bubbleZoomDurationMillis = ReaderPreferences.BUBBLE_ZOOM_DURATION_DEFAULT
@@ -83,8 +83,8 @@ class PagerConfig(
         readerPreferences.bubbleZoom
             .register({ bubbleZoomEnabled = it })
 
-        readerPreferences.bubbleZoomPadding
-            .register({ bubbleZoomPadding = it })
+        readerPreferences.bubbleZoomMagnification
+            .register({ bubbleZoomMagnification = it })
 
         readerPreferences.bubbleZoomAnimationDuration
             .register({ bubbleZoomDurationMillis = it })

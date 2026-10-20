@@ -128,17 +128,18 @@ internal fun ColumnScope.GeneralPage(viewModel: ReaderSettingsViewModel) {
         pref = viewModel.preferences.bubbleZoom,
     )
     if (bubbleZoomEnabled) {
-        val bubbleZoomPaddingPref = viewModel.preferences.bubbleZoomPadding
-        val bubbleZoomPadding by bubbleZoomPaddingPref.collectAsState()
+        val bubbleZoomMagnificationPref = viewModel.preferences.bubbleZoomMagnification
+        val bubbleZoomMagnification by bubbleZoomMagnificationPref.collectAsState()
         val bubbleZoomDurationPref = viewModel.preferences.bubbleZoomAnimationDuration
         val bubbleZoomDuration by bubbleZoomDurationPref.collectAsState()
 
         SliderItem(
-            value = bubbleZoomPadding,
-            valueRange = ReaderPreferences.BUBBLE_ZOOM_PADDING_MIN..ReaderPreferences.BUBBLE_ZOOM_PADDING_MAX,
-            label = stringResource(MR.strings.pref_bubble_zoom_padding),
-            valueString = "$bubbleZoomPadding%",
-            onChange = { bubbleZoomPaddingPref.set(it) },
+            value = bubbleZoomMagnification,
+            valueRange =
+            ReaderPreferences.BUBBLE_ZOOM_MAGNIFICATION_MIN..ReaderPreferences.BUBBLE_ZOOM_MAGNIFICATION_MAX,
+            label = stringResource(MR.strings.pref_bubble_zoom_magnification),
+            valueString = "+$bubbleZoomMagnification%",
+            onChange = { bubbleZoomMagnificationPref.set(it) },
             pillColor = MaterialTheme.colorScheme.surfaceContainerHighest,
         )
         SliderItem(

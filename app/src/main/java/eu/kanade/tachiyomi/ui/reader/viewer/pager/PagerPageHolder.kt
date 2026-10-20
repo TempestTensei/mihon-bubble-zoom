@@ -2,13 +2,17 @@ package eu.kanade.tachiyomi.ui.reader.viewer.pager
 
 import android.annotation.SuppressLint
 import android.content.Context
+import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.BitmapRegionDecoder
+import android.graphics.Rect
 import android.view.LayoutInflater
 import androidx.core.view.isVisible
 import eu.kanade.presentation.util.formattedMessage
 import eu.kanade.tachiyomi.databinding.ReaderErrorBinding
 import eu.kanade.tachiyomi.source.model.Page
 import eu.kanade.tachiyomi.ui.reader.bubblezoom.GrayImage
+import eu.kanade.tachiyomi.ui.reader.bubblezoom.Region
 import eu.kanade.tachiyomi.ui.reader.model.InsertPage
 import eu.kanade.tachiyomi.ui.reader.model.ReaderPage
 import eu.kanade.tachiyomi.ui.reader.viewer.ReaderPageImageView
@@ -68,6 +72,17 @@ class PagerPageHolder(
      */
     private var detectJob: Job? = null
 
+    /**
+     * Job for cropping a bubble region for the pop overlay, off the main thread.
+     */
+    private var popJob: Job? = null
+
+    /**
+     * The displayed (post-split) image bytes, kept for cropping bubble regions. Only set
+     * while bubble zoom is enabled.
+     */
+    private var regionImageBytes: ByteArray? = null
+
     init {
         loadJob = scope.launch { loadPageAndProcessStatus() }
     }
@@ -82,6 +97,9 @@ class PagerPageHolder(
         loadJob = null
         detectJob?.cancel()
         detectJob = null
+        popJob?.cancel()
+        popJob = null
+        regionImageBytes = null
     }
 
     private fun initProgressIndicator() {
@@ -192,6 +210,7 @@ class PagerPageHolder(
                 }
                 removeErrorLayout()
             }
+            regionImageBytes = detectBytes
             detectBytes?.let { bytes -> launchPanelDetection(bytes) }
         } catch (e: Throwable) {
             logcat(LogPriority.ERROR, e)
@@ -263,6 +282,45 @@ class PagerPageHolder(
             GrayImage(w, h, gray)
         } finally {
             bitmap.recycle()
+        }
+    }
+
+    /**
+     * Pops the given bubble [region] out of the page as an enlarged overlay. Crops the
+     * region off the main thread, then shows it. No-op without the page bytes.
+     */
+    fun popRegion(region: Region, popFactor: Float, durationMillis: Int) {
+        val bytes = regionImageBytes ?: return
+        popJob?.cancel()
+        popJob = scope.launch {
+            val crop = withContext(Dispatchers.Default) {
+                runCatching { decodeRegionCrop(bytes, region) }.getOrNull()
+            } ?: return@launch
+            showPop(crop, region, popFactor, durationMillis)
+        }
+    }
+
+    /**
+     * Cancels any pending crop and removes the bubble pop overlay.
+     */
+    fun clearPopOverlay() {
+        popJob?.cancel()
+        clearPop()
+    }
+
+    private fun decodeRegionCrop(bytes: ByteArray, region: Region): Bitmap? {
+        @Suppress("DEPRECATION")
+        val decoder = BitmapRegionDecoder.newInstance(bytes, 0, bytes.size, false) ?: return null
+        return try {
+            val iw = decoder.width
+            val ih = decoder.height
+            val left = (region.left * iw).toInt().coerceIn(0, iw - 1)
+            val top = (region.top * ih).toInt().coerceIn(0, ih - 1)
+            val right = (region.right * iw).toInt().coerceIn(left + 1, iw)
+            val bottom = (region.bottom * ih).toInt().coerceIn(top + 1, ih)
+            decoder.decodeRegion(Rect(left, top, right, bottom), null)
+        } finally {
+            decoder.recycle()
         }
     }
 
