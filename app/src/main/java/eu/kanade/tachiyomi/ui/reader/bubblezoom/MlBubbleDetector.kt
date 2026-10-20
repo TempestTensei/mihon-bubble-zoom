@@ -3,27 +3,27 @@ package eu.kanade.tachiyomi.ui.reader.bubblezoom
 import ai.onnxruntime.OnnxTensor
 import ai.onnxruntime.OrtEnvironment
 import ai.onnxruntime.OrtSession
-import ai.onnxruntime.TensorInfo
 import android.content.Context
 import logcat.LogPriority
 import tachiyomi.core.common.util.system.logcat
 import java.io.File
 import java.nio.FloatBuffer
+import java.nio.LongBuffer
 
 /**
- * Speech-bubble detector backed by a YOLOv8 ONNX model run on-device with ONNX Runtime.
+ * Speech-bubble and text detector backed by the RT-DETR comic text/bubble ONNX model, run
+ * on-device with ONNX Runtime.
  *
- * The model file is expected in assets as [assetName]. If it is missing or fails to load,
- * detection transparently falls back to [fallback] (the classical detector), so the feature
- * keeps working without the model.
+ * The model ([assetName]) detects speech bubbles, text inside bubbles and free-floating text.
+ * [RtDetrPostprocessor] keeps the bubbles and free text while collapsing text-inside-bubble
+ * into its bubble. If the model is missing or inference fails, detection transparently falls
+ * back to [fallback] (the classical detector), so the feature keeps working without the model.
  */
 class MlBubbleDetector(
     private val context: Context,
     private val fallback: RegionDetector,
     private val assetName: String = "bubble_detector.onnx",
-    private val inputSize: Int = 1024,
-    private val confThreshold: Float = 0.35f,
-    private val iouThreshold: Float = 0.5f,
+    private val confThreshold: Float = 0.3f,
 ) : RegionDetector {
 
     @Volatile private var session: OrtSession? = null
@@ -66,62 +66,71 @@ class MlBubbleDetector(
     }
 
     private fun runModel(session: OrtSession, image: GrayImage): List<Region> {
-        val letterbox = YoloBubblePostprocessor.computeLetterbox(image.width, image.height, inputSize)
-        val input = buildInput(image, letterbox)
         val env = OrtEnvironment.getEnvironment()
-        val shape = longArrayOf(1, 3, inputSize.toLong(), inputSize.toLong())
+        val imageData = buildImageInput(image)
+        val imageTensor = OnnxTensor.createTensor(
+            env,
+            FloatBuffer.wrap(imageData),
+            longArrayOf(1, 3, INPUT_SIZE.toLong(), INPUT_SIZE.toLong()),
+        )
+        // RT-DETR target size is (height, width); it returns boxes in these original pixels.
+        val sizeTensor = OnnxTensor.createTensor(
+            env,
+            LongBuffer.wrap(longArrayOf(image.height.toLong(), image.width.toLong())),
+            longArrayOf(1, 2),
+        )
 
-        OnnxTensor.createTensor(env, FloatBuffer.wrap(input), shape).use { tensor ->
-            val inputName = session.inputNames.iterator().next()
-            session.run(mapOf(inputName to tensor)).use { result ->
-                val output = result[0] as OnnxTensor
-                val dims = (output.info as TensorInfo).shape
-                // Expected [1, channels, anchors] (Ultralytics YOLOv8 export).
-                val channels = dims[1].toInt()
-                val anchors = dims[2].toInt()
-                val channelsFirst = channels < anchors
-                val flat = FloatArray(channels * anchors)
-                output.floatBuffer.get(flat)
+        imageTensor.use {
+            sizeTensor.use {
+                session.run(mapOf(INPUT_IMAGES to imageTensor, INPUT_SIZES to sizeTensor)).use { result ->
+                    val boxesTensor = result[OUTPUT_BOXES].get() as OnnxTensor
+                    val scoresTensor = result[OUTPUT_SCORES].get() as OnnxTensor
+                    val boxes = FloatArray(boxesTensor.floatBuffer.remaining())
+                    boxesTensor.floatBuffer.get(boxes)
+                    val scores = FloatArray(scoresTensor.floatBuffer.remaining())
+                    scoresTensor.floatBuffer.get(scores)
 
-                val boxes = YoloBubblePostprocessor.decode(flat, channels, anchors, channelsFirst, confThreshold)
-                val kept = YoloBubblePostprocessor.nms(boxes, iouThreshold)
-                return YoloBubblePostprocessor.toRegions(kept, letterbox, image.width, image.height)
+                    return RtDetrPostprocessor.toRegions(
+                        boxes = boxes,
+                        scores = scores,
+                        count = scores.size,
+                        origWidth = image.width,
+                        origHeight = image.height,
+                        scoreThreshold = confThreshold,
+                    )
+                }
             }
         }
     }
 
-    /** Letterboxes the grayscale page into a 3-channel CHW float tensor normalized to [0,1]. */
-    private fun buildInput(image: GrayImage, letterbox: YoloBubblePostprocessor.Letterbox): FloatArray {
-        val size = inputSize
+    /** Resizes the grayscale page to [INPUT_SIZE]² and fills a 3-channel CHW float tensor in [0,1]. */
+    private fun buildImageInput(image: GrayImage): FloatArray {
+        val size = INPUT_SIZE
         val plane = size * size
-        val out = FloatArray(3 * plane) { PAD_VALUE }
-        val scale = letterbox.scale
-        val scaledWidth = (image.width * scale).toInt()
-        val scaledHeight = (image.height * scale).toInt()
-        val offsetX = letterbox.padX.toInt()
-        val offsetY = letterbox.padY.toInt()
-
-        for (y in 0 until scaledHeight) {
-            val destY = offsetY + y
-            if (destY < 0 || destY >= size) continue
-            val srcY = (y / scale).toInt().coerceIn(0, image.height - 1)
-            val srcRow = srcY * image.width
-            val destRow = destY * size
-            for (x in 0 until scaledWidth) {
-                val destX = offsetX + x
-                if (destX < 0 || destX >= size) continue
-                val srcX = (x / scale).toInt().coerceIn(0, image.width - 1)
+        val input = FloatArray(3 * plane)
+        val srcW = image.width
+        val srcH = image.height
+        for (y in 0 until size) {
+            val srcY = (y.toLong() * srcH / size).toInt().coerceIn(0, srcH - 1)
+            val srcRow = srcY * srcW
+            val dstRow = y * size
+            for (x in 0 until size) {
+                val srcX = (x.toLong() * srcW / size).toInt().coerceIn(0, srcW - 1)
                 val value = image.pixels[srcRow + srcX] / 255f
-                val idx = destRow + destX
-                out[idx] = value
-                out[plane + idx] = value
-                out[2 * plane + idx] = value
+                val idx = dstRow + x
+                input[idx] = value
+                input[plane + idx] = value
+                input[2 * plane + idx] = value
             }
         }
-        return out
+        return input
     }
 
     companion object {
-        private const val PAD_VALUE = 114f / 255f
+        private const val INPUT_SIZE = 640
+        private const val INPUT_IMAGES = "images"
+        private const val INPUT_SIZES = "orig_target_sizes"
+        private const val OUTPUT_BOXES = "boxes"
+        private const val OUTPUT_SCORES = "scores"
     }
 }
