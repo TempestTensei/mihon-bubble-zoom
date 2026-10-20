@@ -46,6 +46,15 @@ class PagerConfig(
     var landscapeZoom = false
         private set
 
+    var bubbleZoomEnabled = false
+        private set
+
+    var bubbleZoomPadding = ReaderPreferences.BUBBLE_ZOOM_PADDING_DEFAULT
+        private set
+
+    var bubbleZoomDurationMillis = ReaderPreferences.BUBBLE_ZOOM_DURATION_DEFAULT
+        private set
+
     init {
         readerPreferences.readerTheme
             .register(
@@ -70,6 +79,15 @@ class PagerConfig(
 
         readerPreferences.landscapeZoom
             .register({ landscapeZoom = it }, { imagePropertyChangedListener?.invoke() })
+
+        readerPreferences.bubbleZoom
+            .register({ bubbleZoomEnabled = it })
+
+        readerPreferences.bubbleZoomPadding
+            .register({ bubbleZoomPadding = it })
+
+        readerPreferences.bubbleZoomAnimationDuration
+            .register({ bubbleZoomDurationMillis = it })
 
         readerPreferences.navigationModePager
             .register({ navigationMode = it }, { updateNavigation(navigationMode) })
