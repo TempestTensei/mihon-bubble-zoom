@@ -76,6 +76,15 @@ class ProjectionRegionDetectorTest {
     }
 
     @Test
+    fun `thin full-width line on a tall blank page returns no regions without throwing`() {
+        // Rows qualify (full-width ink) but no column does (allowedY >= 2 on a 200px page),
+        // which previously produced a negative left bound and an out-of-bounds access.
+        val img = page(100, 200, intArrayOf(0, 0, 100, 1))
+
+        detector.detect(img) shouldBe emptyList()
+    }
+
+    @Test
     fun `detected regions stay within normalized bounds`() {
         val img = page(
             120,

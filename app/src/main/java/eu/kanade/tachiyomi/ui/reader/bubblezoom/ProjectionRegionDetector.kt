@@ -124,6 +124,9 @@ class ProjectionRegionDetector(
                 right = x
             }
         }
+        // Rows can qualify while no column does (e.g. a thin full-width line on a tall page);
+        // treat that as no usable content rather than producing a negative bound.
+        if (left == -1) return null
         return intArrayOf(left, top, right + 1, bottom + 1)
     }
 
