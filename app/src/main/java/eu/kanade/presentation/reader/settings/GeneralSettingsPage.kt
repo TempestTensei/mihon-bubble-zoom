@@ -122,6 +122,36 @@ internal fun ColumnScope.GeneralPage(viewModel: ReaderSettingsViewModel) {
         pref = viewModel.preferences.readWithLongTap,
     )
 
+    val bubbleZoomEnabled by viewModel.preferences.bubbleZoom.collectAsState()
+    CheckboxItem(
+        label = stringResource(MR.strings.pref_bubble_zoom),
+        pref = viewModel.preferences.bubbleZoom,
+    )
+    if (bubbleZoomEnabled) {
+        val bubbleZoomPaddingPref = viewModel.preferences.bubbleZoomPadding
+        val bubbleZoomPadding by bubbleZoomPaddingPref.collectAsState()
+        val bubbleZoomDurationPref = viewModel.preferences.bubbleZoomAnimationDuration
+        val bubbleZoomDuration by bubbleZoomDurationPref.collectAsState()
+
+        SliderItem(
+            value = bubbleZoomPadding,
+            valueRange = ReaderPreferences.BUBBLE_ZOOM_PADDING_MIN..ReaderPreferences.BUBBLE_ZOOM_PADDING_MAX,
+            label = stringResource(MR.strings.pref_bubble_zoom_padding),
+            valueString = "$bubbleZoomPadding%",
+            onChange = { bubbleZoomPaddingPref.set(it) },
+            pillColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+        )
+        SliderItem(
+            value = bubbleZoomDuration,
+            valueRange = ReaderPreferences.BUBBLE_ZOOM_DURATION_MIN..ReaderPreferences.BUBBLE_ZOOM_DURATION_MAX,
+            steps = 13,
+            label = stringResource(MR.strings.pref_bubble_zoom_animation_duration),
+            valueString = stringResource(MR.strings.pref_bubble_zoom_duration_value, bubbleZoomDuration.toString()),
+            onChange = { bubbleZoomDurationPref.set(it) },
+            pillColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+        )
+    }
+
     CheckboxItem(
         label = stringResource(MR.strings.pref_always_show_chapter_transition),
         pref = viewModel.preferences.alwaysShowChapterTransition,
