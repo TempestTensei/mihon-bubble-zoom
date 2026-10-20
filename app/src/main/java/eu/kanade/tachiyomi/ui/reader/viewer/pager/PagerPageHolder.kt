@@ -2,11 +2,13 @@ package eu.kanade.tachiyomi.ui.reader.viewer.pager
 
 import android.annotation.SuppressLint
 import android.content.Context
+import android.graphics.BitmapFactory
 import android.view.LayoutInflater
 import androidx.core.view.isVisible
 import eu.kanade.presentation.util.formattedMessage
 import eu.kanade.tachiyomi.databinding.ReaderErrorBinding
 import eu.kanade.tachiyomi.source.model.Page
+import eu.kanade.tachiyomi.ui.reader.bubblezoom.GrayImage
 import eu.kanade.tachiyomi.ui.reader.model.InsertPage
 import eu.kanade.tachiyomi.ui.reader.model.ReaderPage
 import eu.kanade.tachiyomi.ui.reader.viewer.ReaderPageImageView
@@ -61,6 +63,11 @@ class PagerPageHolder(
      */
     private var loadJob: Job? = null
 
+    /**
+     * Job for detecting panels for bubble zoom, off the main thread.
+     */
+    private var detectJob: Job? = null
+
     init {
         loadJob = scope.launch { loadPageAndProcessStatus() }
     }
@@ -73,6 +80,8 @@ class PagerPageHolder(
         super.onDetachedFromWindow()
         loadJob?.cancel()
         loadJob = null
+        detectJob?.cancel()
+        detectJob = null
     }
 
     private fun initProgressIndicator() {
@@ -151,9 +160,14 @@ class PagerPageHolder(
         try {
             val buffer = withContext(Dispatchers.IO) { streamFn().use { Buffer().readFrom(it) } }
             // Splitting, merging and sampling the background decode the image, which is CPU work
+            var detectBytes: ByteArray? = null
             val (source, isAnimated, background) = withContext(Dispatchers.Default) {
                 val source = process(item, buffer)
                 val isAnimated = ImageUtil.isAnimatedAndSupported(source)
+                if (viewer.config.bubbleZoomEnabled && !isAnimated) {
+                    // Snapshot the displayed (post-split) bytes for off-thread panel detection.
+                    detectBytes = runCatching { source.peek().readByteArray() }.getOrNull()
+                }
                 val background = if (!isAnimated && viewer.config.automaticBackground) {
                     ImageUtil.chooseBackground(context, source.peek().inputStream())
                 } else {
@@ -178,11 +192,77 @@ class PagerPageHolder(
                 }
                 removeErrorLayout()
             }
+            detectBytes?.let { bytes -> launchPanelDetection(bytes) }
         } catch (e: Throwable) {
             logcat(LogPriority.ERROR, e)
             withContext(Dispatchers.Main) {
                 setError(e)
             }
+        }
+    }
+
+    /**
+     * Stable per-page cache key for bubble-zoom detection. Split halves of a wide page
+     * share the parent's index, so the side is included to keep them distinct.
+     */
+    internal fun bubbleZoomKey(): String {
+        val side = if (page is InsertPage) "b" else "a"
+        return "${page.chapter.chapter.id}:${page.index}:$side"
+    }
+
+    /**
+     * Decodes a downscaled grayscale copy of [bytes] off the main thread and caches the
+     * detected panels for this page.
+     */
+    private fun launchPanelDetection(bytes: ByteArray) {
+        detectJob?.cancel()
+        detectJob = scope.launch(Dispatchers.Default) {
+            val gray = runCatching { decodeGrayImage(bytes, BUBBLE_ZOOM_MAX_DIMENSION) }.getOrNull()
+            if (gray != null) {
+                runCatching {
+                    viewer.panelDetectionCache.detectAndCache(
+                        bubbleZoomKey(),
+                        gray,
+                        rtl = viewer is R2LPagerViewer,
+                    )
+                }
+            }
+        }
+    }
+
+    /**
+     * Decodes [bytes] into a [GrayImage] whose longest edge is at most [maxDimension].
+     */
+    private fun decodeGrayImage(bytes: ByteArray, maxDimension: Int): GrayImage? {
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+        val srcWidth = bounds.outWidth
+        val srcHeight = bounds.outHeight
+        if (srcWidth <= 0 || srcHeight <= 0) return null
+
+        var sampleSize = 1
+        while (srcWidth / sampleSize > maxDimension || srcHeight / sampleSize > maxDimension) {
+            sampleSize *= 2
+        }
+
+        val options = BitmapFactory.Options().apply { inSampleSize = sampleSize }
+        val bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options) ?: return null
+        return try {
+            val w = bitmap.width
+            val h = bitmap.height
+            val argb = IntArray(w * h)
+            bitmap.getPixels(argb, 0, w, 0, 0, w, h)
+            val gray = IntArray(w * h)
+            for (i in argb.indices) {
+                val color = argb[i]
+                val r = (color shr 16) and 0xFF
+                val g = (color shr 8) and 0xFF
+                val b = color and 0xFF
+                gray[i] = (r * 299 + g * 587 + b * 114) / 1000
+            }
+            GrayImage(w, h, gray)
+        } finally {
+            bitmap.recycle()
         }
     }
 
@@ -310,3 +390,5 @@ class PagerPageHolder(
         errorLayout = null
     }
 }
+
+private const val BUBBLE_ZOOM_MAX_DIMENSION = 1024
