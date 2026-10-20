@@ -15,3 +15,6 @@ local.properties
 
 # macOS specific files
 .DS_Store
+
+# Bubble-zoom ML model (downloaded separately, not distributed in-repo)
+app/src/main/assets/*.onnx

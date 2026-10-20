@@ -13,6 +13,7 @@ import androidx.viewpager.widget.ViewPager
 import eu.kanade.tachiyomi.R
 import eu.kanade.tachiyomi.ui.reader.ReaderActivity
 import eu.kanade.tachiyomi.ui.reader.bubblezoom.GuidedZoomSession
+import eu.kanade.tachiyomi.ui.reader.bubblezoom.MlBubbleDetector
 import eu.kanade.tachiyomi.ui.reader.bubblezoom.PanelDetectionCache
 import eu.kanade.tachiyomi.ui.reader.bubblezoom.SpeechBubbleDetector
 import eu.kanade.tachiyomi.ui.reader.bubblezoom.StepResult
@@ -60,7 +61,9 @@ abstract class PagerViewer(val activity: ReaderActivity) : Viewer {
      * Shared cache of detected panels per page, used by the bubble-zoom feature. Holders
      * populate it off the main thread; this viewer reads it when stepping through regions.
      */
-    val panelDetectionCache = PanelDetectionCache(SpeechBubbleDetector())
+    val panelDetectionCache = PanelDetectionCache(
+        MlBubbleDetector(activity.applicationContext, fallback = SpeechBubbleDetector()),
+    )
 
     /**
      * Active bubble-zoom session for the current page, or null when bubble zoom is off or

@@ -261,6 +261,9 @@ dependencies {
     // RxJava
     implementation(libs.rxJava)
 
+    // ML: on-device speech-bubble detection for reader bubble zoom
+    implementation("com.microsoft.onnxruntime:onnxruntime-android:1.20.0")
+
     // Networking
     implementation(libs.bundles.okhttp)
     implementation(libs.okio)
