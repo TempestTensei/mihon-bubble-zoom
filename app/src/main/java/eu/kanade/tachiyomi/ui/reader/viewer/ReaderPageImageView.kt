@@ -37,6 +37,7 @@ import com.github.chrisbanes.photoview.PhotoView
 import eu.kanade.tachiyomi.data.coil.ImageDecoder
 import eu.kanade.tachiyomi.data.coil.cropBorders
 import eu.kanade.tachiyomi.data.coil.webtoonStrips
+import eu.kanade.tachiyomi.ui.reader.bubblezoom.Region
 import eu.kanade.tachiyomi.ui.reader.viewer.webtoon.WebtoonStripImageView
 import eu.kanade.tachiyomi.util.system.animatorDurationScale
 import eu.kanade.tachiyomi.util.view.isVisibleOnScreen
@@ -118,7 +119,70 @@ open class ReaderPageImageView @JvmOverloads constructor(
         }
     }
 
+    /**
+     * When true, the bubble-zoom feature is driving the zoom for this page, so the
+     * automatic landscape zoom must not fight it.
+     */
+    var regionZoomActive: Boolean = false
+
+    /**
+     * Whether this page is backed by a ready [SubsamplingScaleImageView] and can be
+     * zoomed to a region. Animated (GIF) pages and not-yet-loaded pages return false.
+     */
+    fun supportsRegionZoom(): Boolean {
+        val view = pageView as? SubsamplingScaleImageView ?: return false
+        return view.isReady
+    }
+
+    /**
+     * Animates a zoom into [region] (normalized source coordinates), padded by
+     * [paddingPercent] on each side, so it fills the view. No-op unless the page is a
+     * ready [SubsamplingScaleImageView].
+     */
+    fun zoomToRegion(region: Region, paddingPercent: Int, durationMillis: Int) {
+        val view = pageView as? SubsamplingScaleImageView ?: return
+        if (!view.isReady) return
+        val sw = view.sWidth.toFloat()
+        val sh = view.sHeight.toFloat()
+        if (sw <= 0f || sh <= 0f || width == 0 || height == 0) return
+
+        val padX = region.width * sw * (paddingPercent / 100f)
+        val padY = region.height * sh * (paddingPercent / 100f)
+        val left = (region.left * sw - padX).coerceAtLeast(0f)
+        val top = (region.top * sh - padY).coerceAtLeast(0f)
+        val right = (region.right * sw + padX).coerceAtMost(sw)
+        val bottom = (region.bottom * sh + padY).coerceAtMost(sh)
+
+        val rectWidth = (right - left).coerceAtLeast(1f)
+        val rectHeight = (bottom - top).coerceAtLeast(1f)
+        val targetScale = minOf(width / rectWidth, height / rectHeight)
+            .coerceIn(view.minScale, view.maxScale)
+        val center = PointF((left + right) / 2f, (top + bottom) / 2f)
+
+        view.animateScaleAndCenter(targetScale, center)
+            ?.withDuration(durationMillis.toLong())
+            ?.withEasing(EASE_IN_OUT_QUAD)
+            ?.withInterruptible(true)
+            ?.start()
+    }
+
+    /**
+     * Animates back to the full-page view (minimum scale, centered). No-op unless the
+     * page is a ready [SubsamplingScaleImageView].
+     */
+    fun resetRegionZoom(durationMillis: Int) {
+        val view = pageView as? SubsamplingScaleImageView ?: return
+        if (!view.isReady) return
+        val center = PointF(view.sWidth / 2f, view.sHeight / 2f)
+        view.animateScaleAndCenter(view.minScale, center)
+            ?.withDuration(durationMillis.toLong())
+            ?.withEasing(EASE_IN_OUT_QUAD)
+            ?.withInterruptible(true)
+            ?.start()
+    }
+
     private fun SubsamplingScaleImageView.landscapeZoom(forward: Boolean) {
+        if (regionZoomActive) return
         if (
             config != null &&
             config!!.landscapeZoom &&
