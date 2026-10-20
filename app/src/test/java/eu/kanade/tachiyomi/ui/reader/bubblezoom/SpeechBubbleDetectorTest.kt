@@ -132,6 +132,20 @@ class SpeechBubbleDetectorTest {
     }
 
     @Test
+    fun `ignores an enclosed region with a few scattered marks (facial features)`() {
+        val w = 200
+        val h = 200
+        val px = blank(w, h)
+        outline(px, w, 40, 40, 150, 160)
+        // a handful of small marks scattered, not aligned in a text row (eyes, nostril, etc.)
+        fill(px, w, 60, 60, 66, 66)
+        fill(px, w, 120, 70, 126, 76)
+        fill(px, w, 90, 120, 96, 126)
+
+        detector.detect(GrayImage(w, h, px)) shouldBe emptyList()
+    }
+
+    @Test
     fun `detected regions stay within normalized bounds`() {
         val w = 200
         val h = 200

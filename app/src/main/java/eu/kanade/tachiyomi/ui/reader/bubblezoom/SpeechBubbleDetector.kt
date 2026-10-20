@@ -42,13 +42,15 @@ class SpeechBubbleDetector(
         val minSolidity: Float = 0.45f,
         val maxAspect: Float = 6f,
         /** Minimum number of ink blobs inside — text has many, artwork has few. */
-        val minInkComponents: Int = 3,
+        val minInkComponents: Int = 4,
         /** Fraction of ink blobs that must be text-sized (small) rather than large strokes. */
         val minSmallComponentRatio: Float = 0.6f,
+        /** A text line must have at least this many small blobs aligned in a row (text, not scattered marks). */
+        val minRowComponents: Int = 3,
         /** A text-sized blob is at most this fraction of the page tall. */
-        val maxLetterHeightFraction: Float = 0.06f,
+        val maxLetterHeightFraction: Float = 0.05f,
         /** Reject if any single ink blob is taller than this fraction of the region (a big stroke). */
-        val maxDominantStrokeFraction: Float = 0.6f,
+        val maxDominantStrokeFraction: Float = 0.55f,
         /** Grow each detected bubble by this fraction so the outline is included. */
         val paddingFraction: Float = 0.03f,
     )
@@ -218,6 +220,7 @@ class SpeechBubbleDetector(
         val stack = IntArray(bw * bh)
         var components = 0
         var small = 0
+        val smallCenters = ArrayList<Int>()
 
         for (ly in 0 until bh) {
             for (lx in 0 until bw) {
@@ -253,12 +256,31 @@ class SpeechBubbleDetector(
                 val compHeight = bottom - top + 1
                 if (compHeight > dominantLimit) return false // a big stroke => artwork, not text
                 components++
-                if (compHeight <= maxLetterHeight) small++
+                if (compHeight <= maxLetterHeight) {
+                    small++
+                    smallCenters.add((top + bottom) / 2)
+                }
             }
         }
 
         if (components < config.minInkComponents) return false
-        return small.toFloat() / components >= config.minSmallComponentRatio
+        if (small.toFloat() / components < config.minSmallComponentRatio) return false
+        // Require a row: several small blobs aligned at a similar height (a line of text),
+        // which scattered facial/body marks do not form.
+        return maxComponentsInRow(smallCenters, maxLetterHeight) >= config.minRowComponents
+    }
+
+    /** Largest number of component centers that fall within any vertical band of [band] pixels. */
+    private fun maxComponentsInRow(centers: List<Int>, band: Int): Int {
+        if (centers.isEmpty()) return 0
+        val sorted = centers.sorted()
+        var best = 1
+        var start = 0
+        for (end in sorted.indices) {
+            while (sorted[end] - sorted[start] > band) start++
+            best = maxOf(best, end - start + 1)
+        }
+        return best
     }
 
     private fun passesShape(bw: Int, bh: Int, blobArea: Int, w: Int, h: Int): Boolean {

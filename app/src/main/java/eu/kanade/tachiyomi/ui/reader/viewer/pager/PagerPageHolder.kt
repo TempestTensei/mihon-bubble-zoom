@@ -449,4 +449,4 @@ class PagerPageHolder(
     }
 }
 
-private const val BUBBLE_ZOOM_MAX_DIMENSION = 1024
+private const val BUBBLE_ZOOM_MAX_DIMENSION = 1600
