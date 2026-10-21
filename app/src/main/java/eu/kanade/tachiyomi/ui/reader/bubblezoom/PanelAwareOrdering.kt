@@ -1,35 +1,51 @@
 package eu.kanade.tachiyomi.ui.reader.bubblezoom
 
+import java.util.IdentityHashMap
 import kotlin.math.max
 import kotlin.math.min
 
 /**
- * Orders detected text/bubble [Region]s by panel: panels are visited in reading order (rows
- * top-to-bottom, right-to-left within a row for manga), and within each panel its regions are
- * ordered the same way. Regions that fall outside every panel are appended at the end in plain
- * reading order.
+ * Orders detected text/bubble [Region]s by panel.
+ *
+ * Each detected panel that holds at least one region becomes a cell (its box = the panel box);
+ * each region that falls outside every detected panel becomes its own cell (its box = the region
+ * box). Cells are visited in reading order (rows top-to-bottom, right-to-left within a row for
+ * manga), and a panel cell's regions are ordered the same way. Making un-panelled regions their
+ * own cells means that when the panel detector only finds *some* panels, the remaining regions
+ * are still placed by their position, not dumped at the end.
  *
  * Falls back to [RegionOrdering] when no panels are available.
  */
 object PanelAwareOrdering {
 
+    private class Cell(val box: Region, val regions: List<Region>)
+
     fun order(regions: List<Region>, panels: List<Region>, rtl: Boolean): List<Region> {
+        if (regions.isEmpty()) return regions
         if (panels.isEmpty()) return RegionOrdering.order(regions, rtl)
 
-        val orderedPanels = RegionOrdering.order(panels, rtl)
-        val buckets = Array(orderedPanels.size) { mutableListOf<Region>() }
-        val unassigned = mutableListOf<Region>()
-
+        val buckets = HashMap<Int, MutableList<Region>>()
+        val cells = ArrayList<Cell>()
         for (region in regions) {
-            val panelIndex = bestPanel(region, orderedPanels)
-            if (panelIndex >= 0) buckets[panelIndex].add(region) else unassigned.add(region)
+            val panelIndex = bestPanel(region, panels)
+            if (panelIndex >= 0) {
+                buckets.getOrPut(panelIndex) { mutableListOf() }.add(region)
+            } else {
+                cells.add(Cell(region, listOf(region)))
+            }
         }
+        buckets.forEach { (panelIndex, bucket) ->
+            cells.add(Cell(panels[panelIndex], RegionOrdering.order(bucket, rtl)))
+        }
+
+        val cellByBox = IdentityHashMap<Region, Cell>()
+        cells.forEach { cellByBox[it.box] = it }
+        val orderedBoxes = RegionOrdering.order(cells.map { it.box }, rtl)
 
         val result = ArrayList<Region>(regions.size)
-        for (bucket in buckets) {
-            result.addAll(RegionOrdering.order(bucket, rtl))
+        for (box in orderedBoxes) {
+            cellByBox[box]?.let { result.addAll(it.regions) }
         }
-        result.addAll(RegionOrdering.order(unassigned, rtl))
         return result
     }
 

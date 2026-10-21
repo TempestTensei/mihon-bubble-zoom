@@ -45,6 +45,23 @@ class PanelAwareOrderingTest {
     }
 
     @Test
+    fun `places regions whose panel was not detected by position, not at the end`() {
+        // Only the bottom panel is detected; the top/middle bubbles have no panel.
+        val bottomPanel = Region(0.1f, 0.6f, 0.9f, 0.95f)
+        val topBubble = Region(0.4f, 0.1f, 0.6f, 0.2f)
+        val midBubble = Region(0.1f, 0.35f, 0.3f, 0.45f)
+        val bottomBubble = Region(0.2f, 0.7f, 0.4f, 0.8f)
+
+        val ordered = PanelAwareOrdering.order(
+            regions = listOf(bottomBubble, topBubble, midBubble),
+            panels = listOf(bottomPanel),
+            rtl = true,
+        )
+
+        ordered shouldBe listOf(topBubble, midBubble, bottomBubble)
+    }
+
+    @Test
     fun `assigns a region to the panel it overlaps most`() {
         val leftPanel = Region(0.0f, 0.0f, 0.5f, 1.0f)
         val rightPanel = Region(0.5f, 0.0f, 1.0f, 1.0f)
