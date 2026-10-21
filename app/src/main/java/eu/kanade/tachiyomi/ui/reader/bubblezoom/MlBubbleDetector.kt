@@ -73,10 +73,10 @@ class MlBubbleDetector(
             FloatBuffer.wrap(imageData),
             longArrayOf(1, 3, INPUT_SIZE.toLong(), INPUT_SIZE.toLong()),
         )
-        // RT-DETR target size is (height, width); it returns boxes in these original pixels.
+        // This export scales boxes x by the first value and y by the second, i.e. (width, height).
         val sizeTensor = OnnxTensor.createTensor(
             env,
-            LongBuffer.wrap(longArrayOf(image.height.toLong(), image.width.toLong())),
+            LongBuffer.wrap(longArrayOf(image.width.toLong(), image.height.toLong())),
             longArrayOf(1, 2),
         )
 
