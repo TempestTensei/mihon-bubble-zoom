@@ -6,7 +6,6 @@ import ai.onnxruntime.OrtSession
 import android.content.Context
 import logcat.LogPriority
 import tachiyomi.core.common.util.system.logcat
-import java.io.File
 import java.nio.FloatBuffer
 import java.nio.LongBuffer
 
@@ -23,7 +22,7 @@ class MlBubbleDetector(
     private val context: Context,
     private val fallback: RegionDetector,
     private val assetName: String = "bubble_detector.onnx",
-    private val confThreshold: Float = 0.3f,
+    private val confThreshold: Float = 0.4f,
 ) : RegionDetector {
 
     @Volatile private var session: OrtSession? = null
@@ -37,14 +36,11 @@ class MlBubbleDetector(
         if (initialized) return
         initialized = true
         available = try {
-            val modelFile = File(context.filesDir, assetName)
-            if (!modelFile.exists() || modelFile.length() == 0L) {
-                context.assets.open(assetName).use { input ->
-                    modelFile.outputStream().use { input.copyTo(it) }
-                }
-            }
+            // Load straight from the bundled asset bytes so a model swap in the APK always takes
+            // effect (loading from a cached file could pick up a stale copy from an older build).
+            val modelBytes = context.assets.open(assetName).use { it.readBytes() }
             val env = OrtEnvironment.getEnvironment()
-            session = env.createSession(modelFile.absolutePath, OrtSession.SessionOptions())
+            session = env.createSession(modelBytes, OrtSession.SessionOptions())
             logcat { "Bubble ML model loaded from $assetName" }
             true
         } catch (t: Throwable) {
@@ -85,10 +81,12 @@ class MlBubbleDetector(
                 session.run(mapOf(INPUT_IMAGES to imageTensor, INPUT_SIZES to sizeTensor)).use { result ->
                     val boxesTensor = result[OUTPUT_BOXES].get() as OnnxTensor
                     val scoresTensor = result[OUTPUT_SCORES].get() as OnnxTensor
-                    val boxes = FloatArray(boxesTensor.floatBuffer.remaining())
-                    boxesTensor.floatBuffer.get(boxes)
-                    val scores = FloatArray(scoresTensor.floatBuffer.remaining())
-                    scoresTensor.floatBuffer.get(scores)
+                    val boxesBuffer = boxesTensor.floatBuffer.also { it.rewind() }
+                    val boxes = FloatArray(boxesBuffer.remaining())
+                    boxesBuffer.get(boxes)
+                    val scoresBuffer = scoresTensor.floatBuffer.also { it.rewind() }
+                    val scores = FloatArray(scoresBuffer.remaining())
+                    scoresBuffer.get(scores)
 
                     return RtDetrPostprocessor.toRegions(
                         boxes = boxes,
