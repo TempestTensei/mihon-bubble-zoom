@@ -1,0 +1,78 @@
+name: Sync with upstream Mihon
+
+# Keeps this fork's feature/bubble-zoom branch up to date with mihonapp/mihon.
+# Runs daily and can be triggered manually. When upstream changes do not conflict
+# with the bubble-zoom changes, it merges and pushes automatically. When they
+# conflict, it opens an issue so you can merge locally and resolve.
+
+on:
+  schedule:
+    - cron: '0 7 * * *' # daily, 07:00 UTC
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+  issues: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout feature/bubble-zoom
+        uses: actions/checkout@v4
+        with:
+          ref: feature/bubble-zoom
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Merge upstream main
+        id: merge
+        run: |
+          git remote add upstream https://github.com/mihonapp/mihon.git
+          git fetch upstream main
+          if git merge --no-edit upstream/main; then
+            echo "conflict=false" >> "$GITHUB_OUTPUT"
+          else
+            git merge --abort
+            echo "conflict=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Push merged changes
+        if: steps.merge.outputs.conflict == 'false'
+        run: git push origin feature/bubble-zoom
+
+      - name: Open an issue when a manual merge is needed
+        if: steps.merge.outputs.conflict == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const open = await github.rest.issues.listForRepo({
+              owner, repo, state: 'open', labels: 'upstream-sync',
+            });
+            if (open.data.length === 0) {
+              await github.rest.issues.create({
+                owner, repo,
+                title: 'Upstream Mihon sync needs a manual merge',
+                labels: ['upstream-sync'],
+                body: [
+                  'The daily automatic merge of `mihonapp/mihon` `main` into',
+                  '`feature/bubble-zoom` hit conflicts and was aborted.',
+                  '',
+                  'Resolve it locally:',
+                  '```bash',
+                  'git fetch upstream',
+                  'git checkout feature/bubble-zoom',
+                  'git merge upstream/main   # resolve conflicts, then commit',
+                  'git push',
+                  '```',
+                  '',
+                  'This issue auto-closes next run once the merge is clean.',
+                ].join('\n'),
+              });
+            }
