@@ -267,12 +267,9 @@ abstract class PagerViewer(val activity: ReaderActivity) : Viewer {
         holder?.onPageSelected(forward)
 
         if (regions.isNotEmpty() && holder != null) {
-            val session = GuidedZoomSession(regions)
-            guidedSession = session
-            val result = if (forward) session.enterFromStart() else session.enterFromEnd()
-            if (result is StepResult.Zoom) {
-                holder.popRegion(result.region, popFactor(), config.bubbleZoomDurationMillis)
-            }
+            // Build the session but do NOT pop on page entry: show the full page first so the art
+            // can be taken in. The first tap pops the first region and navigation proceeds from there.
+            guidedSession = GuidedZoomSession(regions)
         } else {
             guidedSession = null
         }
