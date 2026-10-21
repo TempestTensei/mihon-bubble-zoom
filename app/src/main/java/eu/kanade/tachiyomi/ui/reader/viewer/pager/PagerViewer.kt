@@ -14,6 +14,7 @@ import eu.kanade.tachiyomi.R
 import eu.kanade.tachiyomi.ui.reader.ReaderActivity
 import eu.kanade.tachiyomi.ui.reader.bubblezoom.GuidedZoomSession
 import eu.kanade.tachiyomi.ui.reader.bubblezoom.MlBubbleDetector
+import eu.kanade.tachiyomi.ui.reader.bubblezoom.MlPanelDetector
 import eu.kanade.tachiyomi.ui.reader.bubblezoom.PanelDetectionCache
 import eu.kanade.tachiyomi.ui.reader.bubblezoom.SpeechBubbleDetector
 import eu.kanade.tachiyomi.ui.reader.bubblezoom.StepResult
@@ -62,7 +63,8 @@ abstract class PagerViewer(val activity: ReaderActivity) : Viewer {
      * populate it off the main thread; this viewer reads it when stepping through regions.
      */
     val panelDetectionCache = PanelDetectionCache(
-        MlBubbleDetector(activity.applicationContext, fallback = SpeechBubbleDetector()),
+        detector = MlBubbleDetector(activity.applicationContext, fallback = SpeechBubbleDetector()),
+        panelDetector = MlPanelDetector(activity.applicationContext),
     )
 
     /**

@@ -11,6 +11,7 @@ package eu.kanade.tachiyomi.ui.reader.bubblezoom
  */
 class PanelDetectionCache(
     private val detector: RegionDetector,
+    private val panelDetector: RegionDetector? = null,
     private val maxEntries: Int = 64,
 ) {
     private val lock = Any()
@@ -26,7 +27,9 @@ class PanelDetectionCache(
     fun detectAndCache(key: String, image: GrayImage, rtl: Boolean): List<Region> {
         synchronized(lock) { cache[key] }?.let { return it }
         // Run detection outside the lock so main-thread reads never block on it.
-        val ordered = RegionOrdering.order(detector.detect(image), rtl)
+        val regions = detector.detect(image)
+        val panels = panelDetector?.detect(image).orEmpty()
+        val ordered = PanelAwareOrdering.order(regions, panels, rtl)
         return synchronized(lock) { cache.getOrPut(key) { ordered } }
     }
 }
